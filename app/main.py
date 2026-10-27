@@ -2,6 +2,14 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from pydantic import BaseModel
+from fastapi import HTTPException
+from app.services.investigation import (
+    InvestigationRequest,
+    InvestigationResult,
+    investigate_incident,
+)
+
+
 
 app = FastAPI(
     title="Enterprise Agentic AI Platform",
@@ -23,3 +31,21 @@ async def health_check() -> HealthResponse:
         service="enterprise-agentic-ai-platform",
         timestamp=datetime.now(timezone.utc),
     )
+
+@app.post(
+    "/api/v1/incidents/investigate",
+    response_model=InvestigationResult,
+    tags=["Incident Investigation"],
+)
+async def investigate(
+    request: InvestigationRequest,
+) -> InvestigationResult:
+    result = investigate_incident(request.incident_id)
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Incident not found",
+        )
+
+    return result
