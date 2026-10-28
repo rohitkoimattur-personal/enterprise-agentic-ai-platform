@@ -3,13 +3,21 @@ from datetime import datetime, timezone
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi import HTTPException
+from openai import OpenAIError
+import logging
+
+logger = logging.getLogger(__name__)
+
+from app.services.ai_investigation import (
+    AIInvestigationResult,
+    investigate_with_ai,
+)
+
 from app.services.investigation import (
     InvestigationRequest,
     InvestigationResult,
     investigate_incident,
 )
-
-
 
 app = FastAPI(
     title="Enterprise Agentic AI Platform",
@@ -49,3 +57,33 @@ async def investigate(
         )
 
     return result
+
+
+@app.post(
+    "/api/v1/incidents/investigate/ai",
+    response_model=AIInvestigationResult,
+    tags=["AI Incident Investigation"],
+)
+async def investigate_ai(
+    request: InvestigationRequest,
+) -> AIInvestigationResult:
+    try:
+        result = investigate_with_ai(request.incident_id)
+    except OpenAIError as exc:
+        logger.error(
+        	"OpenAI investigation failed: %s",
+        	type(exc).__name__,
+    	) 
+        raise HTTPException(
+            status_code=503,
+            detail="AI investigation service unavailable",
+        ) from exc
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Incident not found",
+        )
+
+    return result
+
