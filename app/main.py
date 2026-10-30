@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi import HTTPException
 from openai import OpenAIError
+from fastapi.concurrency import run_in_threadpool
 import logging
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,12 @@ from app.services.investigation import (
     InvestigationResult,
     investigate_incident,
 )
+
+from app.services.agent import (
+    AgentInvestigationResult,
+    run_agent,
+)
+from app.services.investigation import INCIDENTS
 
 app = FastAPI(
     title="Enterprise Agentic AI Platform",
@@ -86,4 +93,39 @@ async def investigate_ai(
         )
 
     return result
+
+
+@app.post(
+    "/api/v1/incidents/investigate/agent",
+    response_model=AgentInvestigationResult,
+    tags=["Agentic AI Investigation"],
+    responses={
+        404: {"description": "Incident not found"},
+        503: {"description": "AI provider unavailable"},
+        504: {"description": "Investigation limit exceeded"},
+    },
+)
+async def investigate_with_agent(
+    request: InvestigationRequest,
+) -> AgentInvestigationResult:
+    if request.incident_id not in INCIDENTS:
+        raise HTTPException(
+            status_code=404,
+            detail="Incident not found",
+        )
+
+    try:
+        return await run_in_threadpool(
+            run_agent, request.incident_id
+        )
+    except OpenAIError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="AI provider unavailable",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="Agent investigation incomplete",
+        ) from exc
 
