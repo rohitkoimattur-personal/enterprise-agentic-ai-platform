@@ -6,6 +6,10 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
+from app.services.evidence_validator import (
+    validate_investigation,
+)
+
 from app.services.agent_tools import (
     TOOL_FUNCTIONS,
     TOOL_SCHEMAS,
@@ -58,6 +62,7 @@ def run_agent(
 
     tools_used = []
     call_count = 0
+    tool_evidence = {}
 
     for _ in range(MAX_ROUNDS):
         response = client.responses.create(
@@ -102,6 +107,20 @@ def run_agent(
             # Server-controlled audit information.
             result.tools_used = tools_used
             result.incident_id = incident_id
+            validation = validate_investigation(
+                result,
+                tool_evidence,
+            )
+            if not validation.valid:
+                logger.warning(
+                    "Agent evidence validation failed: %s",
+                    validation.issues,
+                )
+                raise RuntimeError(
+                    "Investigation failed evidence validation: "
+                    + "; ".join(validation.issues)
+                )
+
             return result
 
         for call in calls:
@@ -129,12 +148,18 @@ def run_agent(
 
                     output = function(**arguments)
                     tools_used.append(call.name)
+                    if (
+                        call.name in ("get_telemetry", "search_runbooks")
+                        and isinstance(output, dict)
+                        and "error" not in output
+                    ):
+                        tool_evidence[call.name] = output
                     logger.info(
-		    "Agent tool=%s arguments=%s output=%s",
-    		    call.name,
-    		    arguments,
-    		    output,
-		)
+                        "Agent tool=%s arguments=%s output=%s",
+                        call.name,
+                        arguments,
+                        output,
+                    )
                 except (ValueError, TypeError) as exc:
                     output = {
                         "error": "Invalid tool arguments",
@@ -152,5 +177,6 @@ def run_agent(
     raise RuntimeError(
         "Agent exceeded maximum investigation rounds"
     )
+
 
 
